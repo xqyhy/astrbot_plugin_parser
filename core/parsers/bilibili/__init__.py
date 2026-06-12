@@ -414,49 +414,36 @@ class BilibiliParser(BaseParser):
 
         # 获取下载数据
         download_url_data = await video.get_download_url(page_index=page_index)
+
+        # hvc1→hev 标准化：B站新增了 hvc1.* 编码流，但 bilibili-api v17.4.1 未识别
+        # 不处理会导致 video_codecs=None → 排序时 .value 崩溃 → 万能解析器崩溃
+        def _normalize_codecs(data):
+            if isinstance(data, dict):
+                return {k: _normalize_codecs(v) for k, v in data.items()}
+            elif isinstance(data, list):
+                return [_normalize_codecs(item) for item in data]
+            elif isinstance(data, str):
+                return data.replace('hvc1', 'hev')
+            return data
+
+        download_url_data = _normalize_codecs(download_url_data)
+
         detecter = VideoDownloadURLDataDetecter(download_url_data)
-
-        # 手动筛选流，避免 detect_best_streams 内部排序时 video_codecs 为 None 崩溃
-        all_streams = detecter.detect_all()
-        video_candidates = [
-            s for s in all_streams if isinstance(s, VideoStreamDownloadURL)
-        ]
-        audio_candidates = [
-            s for s in all_streams if isinstance(s, AudioStreamDownloadURL)
-        ]
-
-        if not video_candidates:
+        streams = detecter.detect_best_streams(
+            video_max_quality=self.video_quality,
+            codecs=[self.video_codecs],
+            no_dolby_video=True,
+            no_hdr=True,
+        )
+        video_stream = streams[0]
+        if not isinstance(video_stream, VideoStreamDownloadURL):
             raise DownloadException("未找到可下载的视频流")
-
-        # 按质量降序，安全处理 codecs 为 None 或类型不一致的情况
-        def _safe_quality_key(s):
-            try:
-                q = int(s.video_quality.value) if s.video_quality else 0
-            except (ValueError, TypeError, AttributeError):
-                q = 0
-            try:
-                c = int(s.video_codecs.value) if s.video_codecs else 0
-            except (ValueError, TypeError, AttributeError):
-                c = 0
-            return (q, c)
-
-        video_candidates.sort(key=_safe_quality_key, reverse=True)
-
-        def _safe_audio_key(s):
-            try:
-                return int(s.audio_quality.value) if s.audio_quality else 0
-            except (ValueError, TypeError, AttributeError):
-                return 0
-
-        audio_candidates.sort(key=_safe_audio_key, reverse=True)
-
-        video_stream = video_candidates[0]
         logger.debug(
             f"视频流质量: {video_stream.video_quality.name}, 编码: {video_stream.video_codecs}"
         )
 
-        audio_stream = audio_candidates[0] if audio_candidates else None
-        if not audio_stream:
+        audio_stream = streams[1]
+        if not isinstance(audio_stream, AudioStreamDownloadURL):
             return video_stream.url, None
         logger.debug(f"音频流质量: {audio_stream.audio_quality.name}")
         return video_stream.url, audio_stream.url
