@@ -6,6 +6,7 @@
 # astrbot_plugin_parser
 
 _✨ 链接解析器 ✨_  
+恢复仲裁开关版本
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
